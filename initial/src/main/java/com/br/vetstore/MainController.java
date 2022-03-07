@@ -17,7 +17,7 @@ public class MainController {
   @Autowired
   private CategoriesRepository categoriesRepository;
   
-	private static final String TEMPLATE = "Online";
+  private static final String ONLINE = "Online";
 
   @PostMapping(path="/animals/add")
   public @ResponseBody String addNewAnimal (
@@ -63,6 +63,6 @@ public class MainController {
 
   @GetMapping(path="/")
   public @ResponseBody Home home() {
-    return new Home(TEMPLATE);
+    return new Home(ONLINE);
   }
 }
