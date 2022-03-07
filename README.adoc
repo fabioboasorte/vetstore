@@ -1,47 +1,32 @@
 :spring_version: current
+:spring_boot_version: 2.5.4
+:Controller: http://docs.spring.io/spring/docs/{spring_version}/javadoc-api/org/springframework/stereotype/Controller.html
+:SpringApplication: http://docs.spring.io/spring-boot/docs/{spring_boot_version}/api/org/springframework/boot/SpringApplication.html
 :toc:
-:project_id: gs-rest-service
 :icons: font
 :source-highlighter: prettify
+:project_id: veterinary-store-initial
 
-This guide walks you through the process of creating a "`Hello, World`" RESTful web
-service with Spring.
+This guide walks you through the process of creating a Spring application connected to a
+MySQL Database (as opposed to an in-memory, embedded database, which most of the other
+guides and many sample applications use). It uses Spring Data JPA to access the database,
+but this is only one of many possible choices (for example, you could use plain Spring
+JDBC).
 
 == What You Will Build
 
-You will build a service that will accept HTTP GET requests at
-`http://localhost:8080/greeting`.
+You will create a MySQL database, build a Spring application, and connect it to the newly
+created database.
 
-It will respond with a JSON representation of a greeting, as the following listing shows:
-
-====
-[source,json]
-----
-{"id":1,"content":"Hello, World!"}
-----
-====
-
-You can customize the greeting with an optional `name` parameter in the query string, as
-the following listing shows:
-
-====
-[source,text]
-----
-http://localhost:8080/greeting?name=User
-----
-====
-
-The `name` parameter value overrides the default value of `World` and is reflected in the
-response, as the following listing shows:
-
-====
-[source,json]
-----
-{"id":1,"content":"Hello, User!"}
-----
-====
+NOTE: MySQL is licensed with the GPL, so any program binary that you distribute with it
+must use the GPL, too. See the
+https://www.gnu.org/licenses/gpl.html[GNU General Public Licence].
 
 == What You Need
+
+* https://dev.mysql.com/downloads/[MySQL] version 5.6 or better. If you have Docker
+installed, it might be useful to run the database as a
+https://hub.docker.com/_/mysql/[container].
 
 :java_version: 1.8
 include::https://raw.githubusercontent.com/spring-guides/getting-started-macros/main/prereq_editor_jdk_buildtools.adoc[]
@@ -51,14 +36,14 @@ include::https://raw.githubusercontent.com/spring-guides/getting-started-macros/
 [[scratch]]
 == Starting with Spring Initializr
 
-You can use this https://start.spring.io/#!type=maven-project&language=java&platformVersion=2.5.5&packaging=jar&jvmVersion=11&groupId=com.example&artifactId=rest-service&name=rest-service&description=Demo%20project%20for%20Spring%20Boot&packageName=com.example.rest-service&dependencies=web[pre-initialized project] and click Generate to download a ZIP file. This project is configured to fit the examples in this tutorial.
+You can use this https://start.spring.io/#!type=maven-project&language=java&platformVersion=2.5.5&packaging=jar&jvmVersion=11&groupId=com.example&artifactId=accessing-data-mysql&name=accessing-data-mysql&description=Demo%20project%20for%20Spring%20Boot&packageName=com.example.accessing-data-mysql&dependencies=web,data-jpa,mysql[pre-initialized project] and click Generate to download a ZIP file. This project is configured to fit the examples in this tutorial.
 
 To manually initialize the project:
 
 . Navigate to https://start.spring.io.
 This service pulls in all the dependencies you need for an application and does most of the setup for you.
 . Choose either Gradle or Maven and the language you want to use. This guide assumes that you chose Java.
-. Click *Dependencies* and select *Spring Web*.
+. Click *Dependencies* and select *Spring Web*, *Spring Data JPA*, and *MySQL Driver*.
 . Click *Generate*.
 . Download the resulting ZIP file, which is an archive of a web application that is configured with your choices.
 
@@ -67,92 +52,129 @@ NOTE: If your IDE has the Spring Initializr integration, you can complete this p
 NOTE: You can also fork the project from Github and open it in your IDE or other editor.
 
 [[initial]]
-== Create a Resource Representation Class
+== Create the Database
 
-Now that you have set up the project and build system, you can create your web service.
+Open a terminal (command prompt in Microsoft Windows) and open a MySQL client as a user
+who can create new users.
 
-Begin the process by thinking about service interactions.
-
-The service will handle `GET` requests for `/greeting`, optionally with a `name` parameter
-in the query string. The `GET` request should return a `200 OK` response with JSON in the
-body that represents a greeting. It should resemble the following output:
+For example, on a Linux system, use the following command;
 
 ====
-[source,json]
+[source, sh]
 ----
-{
-    "id": 1,
-    "content": "Hello, World!"
-}
+$ sudo mysql --password
 ----
 ====
 
-The `id` field is a unique identifier for the greeting, and `content` is the textual
-representation of the greeting.
+NOTE: This connects to MySQL as `root` and allows access to the user from all hosts. This
+is *not the recommended way* for a production server.
 
-To model the greeting representation, create a resource representation class. To do so,
-provide a plain old Java object with fields, constructors, and accessors for the `id` and
-`content` data, as the following listing (from
-`src/main/java/com/example/restservice/Greeting.java`) shows:
-
-[source,java]
-----
-include::complete/src/main/java/com/example/restservice/Greeting.java[]
-----
+To create a new database, run the following commands at the `mysql` prompt:
 
 ====
-NOTE: This application uses the https://github.com/FasterXML/jackson[Jackson JSON] library to
-automatically marshal instances of type `Greeting` into JSON. Jackson is included by default by the web starter.
-====
-
-== Create a Resource Controller
-
-In Spring's approach to building RESTful web services, HTTP requests are handled by a
-controller. These components are identified by the
-https://docs.spring.io/spring/docs/{spring_version}/javadoc-api/org/springframework/web/bind/annotation/RestController.html[`@RestController`]
-annotation, and the `GreetingController` shown in the following listing (from
-`src/main/java/com/example/restservice/GreetingController.java`) handles `GET` requests
-for `/greeting` by returning a new instance of the `Greeting` class:
-
-====
-[source,java]
+[source, mysql]
 ----
-include::complete/src/main/java/com/example/restservice/GreetingController.java[]
+mysql> create database db_example; -- Creates the new database
+mysql> create user 'springuser'@'%' identified by 'ThePassword'; -- Creates the user
+mysql> grant all on db_example.* to 'springuser'@'%'; -- Gives all privileges to the new user on the newly created database
 ----
 ====
 
-This controller is concise and simple, but there is plenty going on under the hood. We
-break it down step by step.
+== Create the `application.properties` File
 
-The `@GetMapping` annotation ensures that HTTP GET requests to `/greeting` are mapped to the `greeting()` method.
+Spring Boot gives you defaults on all things. For example, the default database is `H2`.
+Consequently, when you want to use any other database, you must define the connection
+attributes in the `application.properties` file.
 
-NOTE: There are companion annotations for other HTTP verbs (e.g. `@PostMapping` for POST). There is also a `@RequestMapping` annotation that they all derive from, and can serve as a synonym (e.g. `@RequestMapping(method=GET)`).
+Create a resource file called `src/main/resources/application.properties`, as the
+following listing shows:
 
-`@RequestParam` binds the value of the query string parameter `name` into the `name`
-parameter of the `greeting()` method. If the `name` parameter is absent in the request,
-the `defaultValue` of `World` is used.
+====
+[source, java]
+----
+include::complete/src/main/resources/application.properties[]
+----
+====
 
-The implementation of the method body creates and returns a new `Greeting` object with
-`id` and `content` attributes based on the next value from the `counter` and formats the
-given `name` by using the greeting `template`.
+Here, `spring.jpa.hibernate.ddl-auto` can be `none`, `update`, `create`, or `create-drop`.
+See the https://docs.jboss.org/hibernate/orm/5.4/userguide/html_single/Hibernate_User_Guide.html#configurations-hbmddl[Hibernate documentation] for details.
 
-A key difference between a traditional MVC controller and the RESTful web service
-controller shown earlier is the way that the HTTP response body is created. Rather than
-relying on a view technology to perform server-side rendering of the greeting data to
-HTML, this RESTful web service controller populates and returns a `Greeting` object. The
-object data will be written directly to the HTTP response as JSON.
+* `none`: The default for `MySQL`. No change is made to the database structure.
+* `update`: Hibernate changes the database according to the given entity structures.
+* `create`: Creates the database every time but does not drop it on close.
+* `create-drop`: Creates the database and drops it when `SessionFactory` closes.
 
-This code uses Spring
-https://docs.spring.io/spring/docs/{spring_version}/javadoc-api/org/springframework/web/bind/annotation/RestController.html[`@RestController`]
-annotation, which marks the class as a controller where every method returns a domain
-object instead of a view. It is shorthand for including both `@Controller` and
-`@ResponseBody`.
+You must begin with either `create` or `update`, because you do not yet have the database
+structure. After the first run, you can switch it to `update` or `none`, according to
+program requirements. Use `update` when you want to make some change to the database
+structure.
 
-The `Greeting` object must be converted to JSON. Thanks to Spring's HTTP message converter
-support, you need not do this conversion manually. Because
-https://github.com/FasterXML/jackson[Jackson 2] is on the classpath, Spring's
-https://docs.spring.io/spring/docs/{spring_version}/javadoc-api/org/springframework/http/converter/json/MappingJackson2HttpMessageConverter.html[`MappingJackson2HttpMessageConverter`]
-is automatically chosen to convert the `Greeting` instance to JSON.
+The default for `H2` and other embedded databases is `create-drop`. For other databases,
+such as `MySQL`, the default is `none`.
+
+NOTE: It is a good security practice to, after your database is in a production state, set
+this to `none`, revoke all privileges from the MySQL user connected to the Spring
+application, and give the MySQL user only `SELECT`, `UPDATE`, `INSERT`, and `DELETE`. You
+can read more about this at the end of this guide.
+
+== Create the `@Entity` Model
+
+You need to create the entity model, as the following listing
+(in `src/main/java/com/br/vetstore/Animals.java`) shows:
+
+====
+[source,java,tabsize=2]
+----
+include::complete/src/main/java/com/br/vetstore/Animals.java[]
+----
+====
+
+Hibernate automatically translates the entity into a table.
+
+== Create the Repository
+
+You need to create the repository that holds Animals records, as the following listing
+(in `src/main/java/com/br/vetstore/animalsRepository.java`) shows:
+
+====
+[source,java,tabsize=2]
+----
+include::complete/src/main/java/com/br/vetstore/animalsRepository.java[]
+----
+====
+
+Spring automatically implements this repository interface in a bean that has the same name
+(with a change in the case -- it is called `AnimalsRepository`).
+
+== Create a Controller
+
+You need to create a controller to handle HTTP requests to your application, as the
+following listing (in `src/main/java/com/br/vetstore/MainController.java`) shows:
+
+====
+[source,java,tabsize=2]
+----
+include::complete/src/main/java/com/br/vetstore/MainController.java[]
+----
+====
+
+NOTE: The preceding example explicitly specifies `POST` and `GET` for the two endpoints.
+By default, `@RequestMapping` maps all HTTP operations.
+
+== Create an Application Class
+
+Spring Initializr creates a simple class for the application. The following listing shows
+the class that Initializr created for this example (in
+`src/main/java/com/br/vetstore/VetStpreApplication.java`):
+
+====
+[source,java,tabsize=2]
+----
+include::initial/src/main/java/com/br/vetstore/VetStpreApplication.java[]
+----
+====
+
+For this example, you need not modify the `VetStpreApplication` class.
 
 include::https://raw.githubusercontent.com/spring-guides/getting-started-macros/main/spring-boot-application-new-path.adoc[]
 
@@ -160,63 +182,106 @@ include::https://raw.githubusercontent.com/spring-guides/getting-started-macros/
 
 include::https://raw.githubusercontent.com/spring-guides/getting-started-macros/main/build_an_executable_jar_with_both.adoc[]
 
-Logging output is displayed. The service should be up and running within a few seconds.
+When you run the application, logging output is displayed. The service should be up and running within a few seconds.
 
 
-== Test the Service
+== Test the Application
 
-Now that the service is up, visit `http://localhost:8080/greeting`, where you should see:
+Now that the application is running, you can test it by using `curl` or some similar tool.
+You have two HTTP endpoints that you can test:
+
+`GET localhost:8080/animals`: Gets all data.
+`POST localhost:8080/animals/add`: Adds one animal to the data.
+
+The following curl command adds a animal:
+
+====
+[source,sh]
+----
+$ curl localhost:8080/demo/add -d name=Farofa -d owner=John
+----
+====
+
+The reply should be as follows:
+
+====
+[source,sh]
+----
+Saved
+----
+====
+
+The following command shows all the animals:
+
+====
+[source,sh]
+----
+$ curl 'localhost:8080/animals'
+----
+====
+
+The reply should be as follows:
 
 ====
 [source,json]
 ----
-{"id":1,"content":"Hello, World!"}
+[{"id":1,"name":"Farofa","owner":"John"}]
 ----
 ====
 
-Provide a `name` query string parameter by visiting
-`http://localhost:8080/greeting?name=User`. Notice how the value of the `content`
-attribute changes from `Hello, World!` to `Hello, User!`, as the following listing shows:
+== Make Some Security Changes
+
+When you are on a production environment, you may be exposed to SQL injection attacks. A
+hacker may inject `DROP TABLE` or any other destructive SQL commands. So, as a security
+practice, you should make some changes to your database before you expose the application
+to your users.
+
+The following command revokes all the privileges from the user associated with the Spring
+application:
 
 ====
-[source,json]
+[source,sh]
 ----
-{"id":2,"content":"Hello, User!"}
+mysql> revoke all on db_example.* from 'springuser'@'%';
 ----
 ====
 
-This change demonstrates that the `@RequestParam` arrangement in `GreetingController` is
-working as expected. The `name` parameter has been given a default value of `World` but
-can be explicitly overridden through the query string.
+Now the Spring application cannot do anything in the database.
 
-Notice also how the `id` attribute has changed from `1` to `2`. This proves that you are
-working against the same `GreetingController` instance across multiple requests and that
-its `counter` field is being incremented on each call as expected.
+The application must have some privileges, so use the following command to grant the
+minimum privileges the application needs:
+
+====
+[source,sh]
+----
+mysql> grant select, insert, delete, update on db_example.* to 'springuser'@'%';
+----
+====
+
+Removing all privileges and granting some privileges gives your Spring application the
+privileges necessary to make changes to only the data of the database and not the
+structure (schema).
+
+When you want to make changes to the database:
+
+. Regrant permissions.
+. Change the `spring.jpa.hibernate.ddl-auto` to `update`.
+. Re-run your applications.
+
+Then repeat the two commands shown here to make your application safe for production use
+again. Better still, use a dedicated migration tool, such as Flyway or Liquibase.
 
 == Summary
 
-Congratulations! You have just developed a RESTful web service with Spring.
+Congratulations! You have just developed a Spring application that is bound to a MySQL
+database and is ready for production!
 
 == See Also
 
 The following guides may also be helpful:
 
-* https://spring.io/guides/gs/accessing-gemfire-data-rest/[Accessing GemFire Data with REST]
-* https://spring.io/guides/gs/accessing-mongodb-data-rest/[Accessing MongoDB Data with REST]
-* https://spring.io/guides/gs/accessing-data-mysql/[Accessing data with MySQL]
-* https://spring.io/guides/gs/accessing-data-rest/[Accessing JPA Data with REST]
-* https://spring.io/guides/gs/accessing-neo4j-data-rest/[Accessing Neo4j Data with REST]
-* https://spring.io/guides/gs/consuming-rest/[Consuming a RESTful Web Service]
-* https://spring.io/guides/gs/consuming-rest-angularjs/[Consuming a RESTful Web Service with AngularJS]
-* https://spring.io/guides/gs/consuming-rest-jquery/[Consuming a RESTful Web Service with jQuery]
-* https://spring.io/guides/gs/consuming-rest-restjs/[Consuming a RESTful Web Service with rest.js]
-* https://spring.io/guides/gs/securing-web/[Securing a Web Application]
-* https://spring.io/guides/tutorials/rest/[Building REST services with Spring]
-* https://spring.io/guides/tutorials/react-and-spring-data-rest/[React.js and Spring Data REST]
-* https://spring.io/guides/gs/spring-boot/[Building an Application with Spring Boot]
-* https://spring.io/guides/gs/testing-restdocs/[Creating API Documentation with Restdocs]
-* https://spring.io/guides/gs/rest-service-cors/[Enabling Cross Origin Requests for a RESTful Web Service]
-* https://spring.io/guides/gs/rest-hateoas/[Building a Hypermedia-Driven RESTful Web Service]
-* https://spring.io/guides/gs/circuit-breaker/[Circuit Breaker]
+* https://spring.io/guides/gs/accessing-data-jpa/[Accessing Data with JPA]
+* https://spring.io/guides/gs/accessing-data-mongodb/[Accessing Data with MongoDB]
+* https://spring.io/guides/gs/accessing-data-gemfire/[Accessing data with Gemfire]
 
 include::https://raw.githubusercontent.com/spring-guides/getting-started-macros/main/footer.adoc[]
